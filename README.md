@@ -1,15 +1,6 @@
 # Uniswap V3 Liquidity Analysis
 
-This project analyzes a Uniswap V3 liquidity position on the USDC/WETH pool for the Tokka Labs take-home assignment.
-
-## Overview
-
-The analysis involves:
-
-- Creating a Uniswap V3 position with 100,000 USDC worth of assets (50% USDC, 50% WETH)
-- Tick range: 200540 to 200560
-- Analysis period: Block 17618642 to 17618742
-- Pool: USDC/WETH (0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640)
+This project analyzes a Uniswap V3 liquidity position on the USDC/WETH pool.
 
 ## Requirements
 
