@@ -1,0 +1,53 @@
+# Uniswap V3 Analysis Configuration
+
+# Ethereum RPC Configuration
+ethereum:
+  rpc_url: ${ETH_RPC_URL} # Will be loaded from environment
+  retry_attempts: 3
+  timeout: 30
+
+# Pool Configuration
+pools:
+  usdc_weth:
+    address: "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
+    name: "USDC/WETH 0.05%"
+    fee_tier: 500 # 0.05%
+    token0:
+      address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      symbol: "USDC"
+      decimals: 6
+    token1:
+      address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+      symbol: "WETH"
+      decimals: 18
+
+# Analysis Parameters
+analysis:
+  default:
+    start_block: 17618642
+    end_block: 17618742
+    initial_portfolio_value: 100000 # USDC
+    portfolio_split: 0.5 # 50/50 split
+    position:
+      tick_lower: 200540
+      tick_upper: 200560
+
+# Output Configuration
+output:
+  directory: "output"
+  formats:
+    - html
+    - png
+  save_raw_data: true
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "analysis.log"
+
+# Cache Configuration
+cache:
+  enabled: true
+  directory: "cache"
+  ttl: 3600 # 1 hour
