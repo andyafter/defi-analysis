@@ -163,24 +163,6 @@ analysis:
       tick_upper: 200600
 ```
 
-## Project Structure
-
-```
-defi-analysis/
-├── main.py              # Simple entry point
-├── cli.py               # Command-line interface
-├── config.yaml          # Configuration file
-├── data_fetcher.py      # Blockchain data fetching
-├── uniswap_v3.py        # Uniswap V3 calculations
-├── analysis.py          # Position analysis logic
-├── visualization.py     # Charts and reports
-├── src/                 # Core modules
-│   ├── config/          # Configuration management
-│   ├── core/            # Abstract interfaces
-│   └── data/            # Data and caching
-└── tests/               # Unit tests
-```
-
 ## Testing
 
 Run the test suite:
