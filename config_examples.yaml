@@ -1,0 +1,139 @@
+# Example configuration showing multiple pools and analysis profiles
+
+# Ethereum RPC Configuration
+ethereum:
+  rpc_url: ${ETH_RPC_URL}
+  retry_attempts: 3
+  timeout: 30
+
+# Multiple Pool Configurations
+pools:
+  # USDC/WETH 0.05% pool
+  usdc_weth_005:
+    address: "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
+    name: "USDC/WETH 0.05%"
+    fee_tier: 500 # 0.05%
+    token0:
+      address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      symbol: "USDC"
+      decimals: 6
+    token1:
+      address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+      symbol: "WETH"
+      decimals: 18
+
+  # USDC/WETH 0.3% pool
+  usdc_weth_03:
+    address: "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8"
+    name: "USDC/WETH 0.3%"
+    fee_tier: 3000 # 0.3%
+    token0:
+      address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      symbol: "USDC"
+      decimals: 6
+    token1:
+      address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+      symbol: "WETH"
+      decimals: 18
+
+  # WBTC/WETH 0.3% pool
+  wbtc_weth:
+    address: "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD"
+    name: "WBTC/WETH 0.3%"
+    fee_tier: 3000 # 0.3%
+    token0:
+      address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
+      symbol: "WBTC"
+      decimals: 8
+    token1:
+      address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+      symbol: "WETH"
+      decimals: 18
+
+# Multiple Analysis Profiles
+analysis:
+  # Default profile
+  default:
+    start_block: 17618642
+    end_block: 17618742
+    initial_portfolio_value: 100000 # USDC
+    portfolio_split: 0.5 # 50/50 split
+    position:
+      tick_lower: 200540
+      tick_upper: 200560
+
+  # Conservative position (wider range)
+  conservative:
+    start_block: 17618642
+    end_block: 17618742
+    initial_portfolio_value: 100000
+    portfolio_split: 0.5
+    position:
+      tick_lower: 200000 # Wider range
+      tick_upper: 201000
+
+  # Aggressive position (narrower range)
+  aggressive:
+    start_block: 17618642
+    end_block: 17618742
+    initial_portfolio_value: 100000
+    portfolio_split: 0.5
+    position:
+      tick_lower: 200580 # Narrower range
+      tick_upper: 200600
+
+  # Different time period
+  recent_analysis:
+    start_block: 18500000
+    end_block: 18500100
+    initial_portfolio_value: 100000
+    portfolio_split: 0.5
+    position:
+      tick_lower: 200540
+      tick_upper: 200560
+
+  # Different portfolio split
+  unbalanced:
+    start_block: 17618642
+    end_block: 17618742
+    initial_portfolio_value: 100000
+    portfolio_split: 0.3 # 30/70 split
+    position:
+      tick_lower: 200540
+      tick_upper: 200560
+
+# Output Configuration
+output:
+  directory: "output"
+  formats:
+    - html
+    - png
+    - json # Also save raw data as JSON
+  save_raw_data: true
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "analysis.log"
+
+# Cache Configuration
+cache:
+  enabled: true
+  directory: "cache"
+  ttl: 3600 # 1 hour
+
+# Usage Examples:
+#
+# 1. Analyze USDC/WETH 0.05% pool with default settings:
+#    python cli.py analyze --pool usdc_weth_005 --analysis default
+#
+# 2. Analyze WBTC/WETH pool with conservative position:
+#    python cli.py analyze --pool wbtc_weth --analysis conservative
+#
+# 3. Compare different strategies on same pool:
+#    python cli.py analyze --pool usdc_weth_005 --analysis aggressive --output-dir output/aggressive
+#    python cli.py analyze --pool usdc_weth_005 --analysis conservative --output-dir output/conservative
+#
+# 4. Analyze with different portfolio splits:
+#    python cli.py analyze --pool usdc_weth_005 --analysis unbalanced
