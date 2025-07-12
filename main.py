@@ -37,7 +37,7 @@ WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 async def main():
     """Main execution function."""
     print("=" * 80)
-    print("Uniswap V3 Liquidity Analysis - Tokka Labs Assignment")
+    print("Uniswap V3 Liquidity Analysis")
     print("=" * 80)
     print(f"Pool: USDC/WETH ({POOL_ADDRESS})")
     print(f"Analysis period: Block {START_BLOCK} to {END_BLOCK}")

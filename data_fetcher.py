@@ -165,8 +165,19 @@ class DataFetcher:
     def __init__(self, rpc_url: str):
         """Initialize the data fetcher with an RPC URL."""
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
+        
+        # Retry connection with backoff
+        max_retries = 3
+        for attempt in range(max_retries):
+            if self.w3.is_connected():
+                break
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(1)  # Wait 1 second before retry
+        
         if not self.w3.is_connected():
-            raise ConnectionError("Failed to connect to Ethereum node")
+            raise ConnectionError(f"Failed to connect to Ethereum node at {rpc_url[:50]}... after {max_retries} attempts")
+        
         self.executor = ThreadPoolExecutor(max_workers=10)
     
     async def get_pool_state(self, pool_address: str, block_number: int) -> PoolState:
