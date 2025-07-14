@@ -240,6 +240,7 @@ async def main():
             position,
             TICK_LOWER,
             TICK_UPPER,
+            pool_data_start.tick,  # Add current tick
             "output/liquidity_distribution.png"
         )
         
@@ -248,8 +249,15 @@ async def main():
                 analysis_results['fee_by_tick'],
                 TICK_LOWER,
                 TICK_UPPER,
+                eth_price_end,  # Add ETH price for conversion
                 "output/fee_accumulation.png"
             )
+        
+        # Generate position value chart
+        visualizer.plot_position_value_chart(
+            analysis_results,
+            "output/position_value.png"
+        )
         
         # Generate HTML report
         visualizer.generate_summary_report(

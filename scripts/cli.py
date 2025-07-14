@@ -285,6 +285,7 @@ async def _run_analysis(config, pool_config, analysis_config, use_cache: bool):
                 position,
                 analysis_config.position.tick_lower,
                 analysis_config.position.tick_upper,
+                pool_data_start.tick,  # Add current tick
                 str(output_dir / "liquidity_distribution.png")
             )
             
@@ -292,7 +293,14 @@ async def _run_analysis(config, pool_config, analysis_config, use_cache: bool):
                 results['fee_by_tick'],
                 analysis_config.position.tick_lower - 10,
                 analysis_config.position.tick_upper + 10,
+                eth_price_end,  # Add ETH price for conversion
                 str(output_dir / "fee_accumulation.png")
+            )
+            
+            # Generate position value chart
+            visualizer.plot_position_value_chart(
+                results,
+                str(output_dir / "position_value.png")
             )
         
         if 'html' in config.output.formats:

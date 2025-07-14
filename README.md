@@ -6,7 +6,7 @@ High-performance Python framework for analyzing Uniswap V3 liquidity positions w
 
 - **Position Analysis**: Calculate impermanent loss, fee earnings, and P&L
 - **10x Performance**: Intelligent caching, parallel processing, connection pooling
-- **Rich Output**: Interactive charts, HTML reports, performance metrics
+- **Enhanced Visualizations**: Professional charts, 4-panel dashboards, modern HTML reports
 - **Easy CLI**: Simple commands for complex analysis
 
 ## 📊 Performance
@@ -98,8 +98,11 @@ pools:
 
 ### Files Generated
 
-- **PNG Charts**: Liquidity distribution, fee accumulation
-- **HTML Report**: Complete analysis summary
+- **PNG Charts**:
+  - Liquidity distribution with position overlay
+  - 4-panel fee analysis dashboard
+  - Position value breakdown chart
+- **HTML Report**: Modern report with embedded visualizations
 - **analysis.log**: Detailed execution logs
 
 ### Example Output
@@ -144,6 +147,7 @@ python scripts/benchmark_optimizations.py
 - [Fee Calculation Guide](FEE_ESTIMATION_GUIDE.md)
 - [Performance Benchmarks](RPC_OPTIMIZATION_RESULTS.md)
 - [Impermanent Loss Guide](IMPERMANENT_LOSS_GUIDE.md)
+- [Enhanced Visualizations](VISUALIZATION_EXAMPLES.md)
 
 ## 📄 License
 
