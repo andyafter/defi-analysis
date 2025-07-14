@@ -55,9 +55,13 @@ async def main():
     os.makedirs("output", exist_ok=True)
 
     try:
-        # Initialize components
+        # Initialize components with optimized settings
         print("\n1. Initializing components...")
-        data_fetcher = DataFetcher(rpc_url)
+        data_fetcher = DataFetcher(
+            rpc_url=rpc_url,
+            max_workers=20,              # Optimized thread pool size
+            max_concurrent_requests=10   # Rate limiting
+        )
         calculator = UniswapV3Calculator()
         analyzer = PositionAnalyzer(calculator)
         visualizer = Visualizer()
@@ -106,7 +110,7 @@ async def main():
         # Fetch swap events between blocks
         print("\n7. Fetching swap events...")
         swap_events = await data_fetcher.get_swap_events(
-            POOL_ADDRESS, START_BLOCK, END_BLOCK
+            POOL_ADDRESS, START_BLOCK, END_BLOCK, chunk_size=2000
         )
         print(f"   Found {len(swap_events)} swap events")
 

@@ -172,9 +172,16 @@ async def _run_analysis(config, pool_config, analysis_config, use_cache: bool):
     logger = logging.getLogger(__name__)
     
     try:
-        # Initialize components
+        # Initialize components with optimized settings
         cache = FileCache(config.cache.directory) if use_cache and config.cache.enabled else None
-        data_fetcher = DataFetcher(config.ethereum.rpc_url)
+        
+        # Create optimized data fetcher with performance settings
+        data_fetcher = DataFetcher(
+            rpc_url=config.ethereum.rpc_url,
+            max_workers=config.performance.max_workers,
+            max_concurrent_requests=config.performance.max_concurrent_requests
+        )
+        
         calculator = UniswapV3Calculator()
         analyzer = PositionAnalyzer(calculator)
         visualizer = Visualizer()
@@ -185,6 +192,7 @@ async def _run_analysis(config, pool_config, analysis_config, use_cache: bool):
         
         logger.info(f"Starting analysis for pool {pool_config.address}")
         logger.info(f"Block range: {analysis_config.start_block} - {analysis_config.end_block}")
+        logger.info(f"Performance settings: {config.performance.max_workers} workers, {config.performance.max_concurrent_requests} concurrent requests")
         
         # Fetch pool data
         pool_data_start = await data_fetcher.get_pool_state(
@@ -220,11 +228,12 @@ async def _run_analysis(config, pool_config, analysis_config, use_cache: bool):
         
         logger.info(f"Position created with liquidity: {position.liquidity}")
         
-        # Fetch events and liquidity distribution
+        # Fetch events and liquidity distribution with optimized chunk size
         swap_events = await data_fetcher.get_swap_events(
             pool_config.address,
             analysis_config.start_block,
-            analysis_config.end_block
+            analysis_config.end_block,
+            chunk_size=config.performance.chunk_size
         )
         
         liquidity_distribution = await data_fetcher.get_liquidity_distribution(
@@ -277,13 +286,17 @@ async def _run_analysis(config, pool_config, analysis_config, use_cache: bool):
         logger.info(f"Analysis complete. Results saved to {output_dir}")
         
     except Exception as e:
-        logger.error(f"Analysis failed: {e}")
+        logger.error(f"Analysis failed: {str(e)}")
         raise
 
 
 async def _show_pool_info(config, pool_config, block_number: Optional[int]):
     """Show pool information."""
-    data_fetcher = DataFetcher(config.ethereum.rpc_url)
+    data_fetcher = DataFetcher(
+        rpc_url=config.ethereum.rpc_url,
+        max_workers=config.performance.max_workers,
+        max_concurrent_requests=config.performance.max_concurrent_requests
+    )
     
     # Use latest block if not specified
     if block_number is None:

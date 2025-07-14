@@ -58,66 +58,150 @@ class TestPositionAnalyzer(unittest.TestCase):
     
     def test_estimate_fees_from_swaps(self):
         """Test fee estimation from swap events."""
-        # Create test position
+        # Create position
         position = Position(
             liquidity=1000000,
-            tick_lower=200540,
-            tick_upper=200560,
-            amount0=5000.0,
-            amount1=2.5
+            tick_lower=100,
+            tick_upper=200,
+            amount0=1000,
+            amount1=1
         )
         
-        # Create test swap events
+        # Create liquidity distribution
+        liquidity_distribution = {tick: 10000000 for tick in range(90, 210)}
+        
+        # Create swap events
         swap_events = [
             SwapEvent(
-                sender="0x123",
-                recipient="0x456",
-                amount0=-1000000,  # 1 USDC sold (negative)
-                amount1=500000000000000000,  # 0.5 WETH bought
-                sqrt_price_x96=1000000000000000000000,
-                liquidity=10000000,
-                tick=200545,
-                block_number=17618650,
+                sender="0x1",
+                recipient="0x2", 
+                amount0=-1000000,  # 1 USDC (assuming 6 decimals)
+                amount1=1000000000000000000,  # 1 ETH
+                sqrt_price_x96=0,
+                liquidity=0,
+                tick=150,
+                block_number=1,
                 transaction_hash="0xabc"
-            ),
-            SwapEvent(
-                sender="0x789",
-                recipient="0xdef",
-                amount0=2000000,  # 2 USDC bought
-                amount1=-1000000000000000000,  # 1 WETH sold (negative)
-                sqrt_price_x96=1100000000000000000000,
-                liquidity=10000000,
-                tick=200550,
-                block_number=17618700,
-                transaction_hash="0xdef"
             )
         ]
         
-        # Create liquidity distribution
-        liquidity_distribution = {tick: 10000000 for tick in range(200530, 200571)}
+        pool_fee = 500  # 0.05%
         
-        # Pool fee is 500 (0.05%)
+        fee_by_tick = self.analyzer.estimate_fees_from_swaps(
+            position, swap_events, liquidity_distribution, pool_fee
+        )
+        
+        # Should have fees distributed across ticks
+        self.assertGreater(len(fee_by_tick), 0)
+        
+        # Total fees should be reasonable
+        total_fee0 = sum(fees[0] for fees in fee_by_tick.values())
+        total_fee1 = sum(fees[1] for fees in fee_by_tick.values())
+        
+        self.assertGreater(total_fee0, 0)
+        self.assertGreater(total_fee1, 0)
+    
+    def test_fee_calculation_accuracy(self):
+        """Test accurate fee calculation with known values."""
+        # Create position with 10% of pool liquidity
+        position = Position(
+            liquidity=1000000000,  # 1e9
+            tick_lower=200540,
+            tick_upper=200560,
+            amount0=1000,
+            amount1=0.5
+        )
+        
+        # Total liquidity is 10x our position
+        liquidity_distribution = {}
+        total_liquidity = 10000000000  # 10e9
+        for tick in range(200530, 200570):
+            liquidity_distribution[tick] = total_liquidity
+        
+        # Single swap: 1M USDC for 500 WETH
+        swap_event = SwapEvent(
+            sender="0x123",
+            recipient="0x456",
+            amount0=-1000000 * 10**6,  # 1M USDC out
+            amount1=500 * 10**18,       # 500 WETH in
+            sqrt_price_x96=0,
+            liquidity=0,
+            tick=200550,  # Within our range
+            block_number=17618700,
+            transaction_hash="0xabc"
+        )
+        
+        pool_fee = 500  # 0.05%
+        
+        fee_by_tick = self.analyzer.estimate_fees_from_swaps(
+            position,
+            [swap_event],
+            liquidity_distribution,
+            pool_fee
+        )
+        
+        total_usdc_fees = sum(fees[0] for fees in fee_by_tick.values())
+        total_weth_fees = sum(fees[1] for fees in fee_by_tick.values())
+        
+        # Expected calculations:
+        # Pool fee rate = 0.0005 (0.05%)
+        # Total USDC fees = 1,000,000 * 0.0005 = 500 USDC
+        # Total WETH fees = 500 * 0.0005 = 0.25 WETH
+        # Our share = 10%
+        # Expected USDC fees = 500 * 0.1 = 50 USDC
+        # Expected WETH fees = 0.25 * 0.1 = 0.025 WETH
+        
+        self.assertAlmostEqual(total_usdc_fees, 50.0, places=2)
+        self.assertAlmostEqual(total_weth_fees, 0.025, places=4)
+    
+    def test_fee_distribution_across_ticks(self):
+        """Test that fees are properly distributed across ticks."""
+        position = Position(
+            liquidity=1000000,
+            tick_lower=100,
+            tick_upper=110,
+            amount0=1000,
+            amount1=1
+        )
+        
+        # Uniform liquidity
+        liquidity_distribution = {tick: 10000000 for tick in range(90, 120)}
+        
+        # Swap that crosses multiple ticks
+        swap_events = [
+            SwapEvent(
+                sender="0x1",
+                recipient="0x2",
+                amount0=-10000000,  # 10 USDC
+                amount1=10000000000000000000,  # 10 ETH
+                sqrt_price_x96=0,
+                liquidity=0,
+                tick=105,  # End in middle of range
+                block_number=1,
+                transaction_hash="0xabc"
+            )
+        ]
+        
+        # Start from tick 100 (implicitly)
         pool_fee = 500
         
         fee_by_tick = self.analyzer.estimate_fees_from_swaps(
             position, swap_events, liquidity_distribution, pool_fee
         )
         
-        # Verify fees are calculated
-        self.assertIsInstance(fee_by_tick, dict)
-        self.assertGreater(len(fee_by_tick), 0)
+        # Fees should be distributed from tick 100 to 105
+        active_ticks = [t for t, fees in fee_by_tick.items() if fees[0] > 0 or fees[1] > 0]
         
-        # Verify all ticks in position range have fee entries
-        for tick in range(position.tick_lower, position.tick_upper + 1):
-            self.assertIn(tick, fee_by_tick)
-            self.assertIsInstance(fee_by_tick[tick], tuple)
-            self.assertEqual(len(fee_by_tick[tick]), 2)
+        self.assertEqual(min(active_ticks), 100)
+        self.assertEqual(max(active_ticks), 105)
+        self.assertEqual(len(active_ticks), 6)  # 100, 101, 102, 103, 104, 105
         
-        # Verify some fees were earned
-        total_usdc_fees = sum(fees[0] for fees in fee_by_tick.values())
-        total_weth_fees = sum(fees[1] for fees in fee_by_tick.values())
-        self.assertGreaterEqual(total_usdc_fees, 0)
-        self.assertGreaterEqual(total_weth_fees, 0)
+        # Fees should be roughly equal across active ticks
+        fees_per_tick = [fee_by_tick[t][0] for t in active_ticks]
+        avg_fee = sum(fees_per_tick) / len(fees_per_tick)
+        
+        for fee in fees_per_tick:
+            self.assertAlmostEqual(fee, avg_fee, places=6)
     
     def test_analyze_position(self):
         """Test complete position analysis."""

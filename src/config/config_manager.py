@@ -45,14 +45,6 @@ class AnalysisConfig:
 
 
 @dataclass
-class EthereumConfig:
-    """Ethereum connection configuration."""
-    rpc_url: str
-    retry_attempts: int = 3
-    timeout: int = 30
-
-
-@dataclass
 class OutputConfig:
     """Output configuration."""
     directory: str
@@ -69,6 +61,25 @@ class LoggingConfig:
 
 
 @dataclass
+class EthereumConfig:
+    """Ethereum connection configuration."""
+    rpc_url: str
+    retry_attempts: int = 3
+    timeout: int = 30
+
+
+@dataclass
+class PerformanceConfig:
+    """Performance optimization configuration."""
+    max_workers: int = 20
+    max_concurrent_requests: int = 10
+    pool_connections: int = 20
+    pool_maxsize: int = 20
+    chunk_size: int = 2000
+    backoff_factor: float = 0.1
+
+
+@dataclass
 class CacheConfig:
     """Cache configuration."""
     enabled: bool = True
@@ -80,6 +91,7 @@ class CacheConfig:
 class Config:
     """Main configuration container."""
     ethereum: EthereumConfig
+    performance: PerformanceConfig
     pools: Dict[str, PoolConfig]
     analysis: Dict[str, AnalysisConfig]
     output: OutputConfig
@@ -170,6 +182,17 @@ class ConfigManager:
             timeout=eth_data.get('timeout', 30)
         )
         
+        # Parse performance config
+        perf_data = data.get('performance', {})
+        performance_config = PerformanceConfig(
+            max_workers=perf_data.get('max_workers', 20),
+            max_concurrent_requests=perf_data.get('max_concurrent_requests', 10),
+            pool_connections=perf_data.get('pool_connections', 20),
+            pool_maxsize=perf_data.get('pool_maxsize', 20),
+            chunk_size=perf_data.get('chunk_size', 2000),
+            backoff_factor=perf_data.get('backoff_factor', 0.1)
+        )
+        
         # Parse pools
         pools = {}
         for pool_name, pool_data in data.get('pools', {}).items():
@@ -223,6 +246,7 @@ class ConfigManager:
         
         return Config(
             ethereum=ethereum_config,
+            performance=performance_config,
             pools=pools,
             analysis=analysis_configs,
             output=output_config,

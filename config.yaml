@@ -6,6 +6,15 @@ ethereum:
   retry_attempts: 3
   timeout: 30
 
+# Performance Configuration
+performance:
+  max_workers: 20 # Thread pool size
+  max_concurrent_requests: 10 # Concurrent RPC requests
+  pool_connections: 20 # HTTP connection pool size
+  pool_maxsize: 20 # Max connections per pool
+  chunk_size: 2000 # Block range chunk size for events
+  backoff_factor: 0.1 # Retry backoff factor
+
 # Pool Configuration
 pools:
   usdc_weth:

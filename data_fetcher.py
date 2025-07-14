@@ -1,14 +1,22 @@
 """
 Data fetcher module for interacting with Ethereum blockchain and Uniswap V3 pools.
+Optimized for high-performance RPC calls with connection pooling and batching.
 """
 
 import json
+import asyncio
+import aiohttp
 from typing import Dict, List, Any, Optional, Tuple
 from decimal import Decimal
 from web3 import Web3
 from web3.contract import Contract
-import asyncio
+from web3.providers.rpc import HTTPProvider
 from concurrent.futures import ThreadPoolExecutor
+import logging
+from dataclasses import dataclass
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
+import requests
 
 # Uniswap V3 Pool ABI (minimal)
 POOL_ABI = json.loads('''[
@@ -159,12 +167,47 @@ class SwapEvent:
         self.transaction_hash = transaction_hash
 
 
-class DataFetcher:
-    """Fetches data from Ethereum blockchain and Uniswap V3 pools."""
+class OptimizedHTTPProvider(HTTPProvider):
+    """Optimized HTTP provider with connection pooling and retry logic."""
     
-    def __init__(self, rpc_url: str):
-        """Initialize the data fetcher with an RPC URL."""
-        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
+    def __init__(self, endpoint_uri: str, pool_connections: int = 20, pool_maxsize: int = 20, 
+                 max_retries: int = 3, backoff_factor: float = 0.1):
+        # Create session with connection pooling
+        session = requests.Session()
+        
+        # Configure retry strategy
+        retry_strategy = Retry(
+            total=max_retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "POST"]
+        )
+        
+        # Configure adapter with connection pooling
+        adapter = HTTPAdapter(
+            pool_connections=pool_connections,
+            pool_maxsize=pool_maxsize,
+            max_retries=retry_strategy
+        )
+        
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        super().__init__(endpoint_uri, session=session)
+
+class DataFetcher:
+    """Optimized data fetcher with connection pooling and batch requests."""
+    
+    def __init__(self, rpc_url: str, max_workers: int = 20, max_concurrent_requests: int = 10):
+        """Initialize optimized data fetcher.
+        
+        Args:
+            rpc_url: Ethereum RPC endpoint URL
+            max_workers: Maximum number of thread pool workers
+            max_concurrent_requests: Maximum concurrent RPC requests
+        """
+        # Initialize Web3 with optimized provider
+        self.w3 = Web3(OptimizedHTTPProvider(rpc_url))
         
         # Retry connection with backoff
         max_retries = 3
@@ -178,89 +221,106 @@ class DataFetcher:
         if not self.w3.is_connected():
             raise ConnectionError(f"Failed to connect to Ethereum node at {rpc_url[:50]}... after {max_retries} attempts")
         
-        self.executor = ThreadPoolExecutor(max_workers=10)
+        # Optimized executor with more workers
+        self.executor = ThreadPoolExecutor(max_workers=max_workers)
+        
+        # Rate limiting semaphore
+        self.semaphore = asyncio.Semaphore(max_concurrent_requests)
+        
+        # Logger
+        self.logger = logging.getLogger(__name__)
+    
+    async def _rate_limited_call(self, func, *args, **kwargs):
+        """Execute function with rate limiting."""
+        async with self.semaphore:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(self.executor, func, *args, **kwargs)
     
     async def get_pool_state(self, pool_address: str, block_number: int) -> PoolState:
-        """Get the state of a Uniswap V3 pool at a specific block."""
+        """Get pool state with optimized batch calls."""
         pool_contract = self.w3.eth.contract(
             address=Web3.to_checksum_address(pool_address),
             abi=POOL_ABI
         )
         
-        # Fetch pool state in parallel
-        loop = asyncio.get_event_loop()
-        
-        # Create proper call parameters for newer web3 version
+        # Batch all contract calls together
         call_params = {'block_identifier': block_number}
         
-        tasks = [
-            loop.run_in_executor(self.executor, lambda: pool_contract.functions.slot0().call(**call_params)),
-            loop.run_in_executor(self.executor, lambda: pool_contract.functions.liquidity().call(**call_params)),
-            loop.run_in_executor(self.executor, lambda: pool_contract.functions.fee().call(**call_params)),
-            loop.run_in_executor(self.executor, lambda: pool_contract.functions.tickSpacing().call(**call_params)),
-            loop.run_in_executor(self.executor, lambda: pool_contract.functions.token0().call(**call_params)),
-            loop.run_in_executor(self.executor, lambda: pool_contract.functions.token1().call(**call_params)),
+        # Create batch of calls
+        calls = [
+            ('slot0', pool_contract.functions.slot0().call),
+            ('liquidity', pool_contract.functions.liquidity().call),
+            ('fee', pool_contract.functions.fee().call),
+            ('tickSpacing', pool_contract.functions.tickSpacing().call),
+            ('token0', pool_contract.functions.token0().call),
+            ('token1', pool_contract.functions.token1().call),
         ]
         
-        results = await asyncio.gather(*tasks)
+        # Execute all calls concurrently with rate limiting
+        tasks = []
+        for name, call_func in calls:
+            task = self._rate_limited_call(lambda f=call_func: f(**call_params))
+            tasks.append(task)
         
-        slot0 = results[0]
-        liquidity = results[1]
-        fee = results[2]
-        tick_spacing = results[3]
-        token0 = results[4]
-        token1 = results[5]
-        
-        return PoolState(
-            sqrt_price_x96=slot0[0],
-            tick=slot0[1],
-            liquidity=liquidity,
-            fee=fee,
-            tick_spacing=tick_spacing,
-            token0=token0,
-            token1=token1,
-            block_number=block_number
-        )
+        try:
+            results = await asyncio.gather(*tasks)
+            
+            slot0, liquidity, fee, tick_spacing, token0, token1 = results
+            
+            self.logger.debug(f"Fetched pool state for {pool_address} at block {block_number}")
+            
+            return PoolState(
+                sqrt_price_x96=slot0[0],
+                tick=slot0[1],
+                liquidity=liquidity,
+                fee=fee,
+                tick_spacing=tick_spacing,
+                token0=token0,
+                token1=token1,
+                block_number=block_number
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching pool state: {e}")
+            raise
     
     async def get_liquidity_distribution(self, 
                                        pool_address: str, 
                                        block_number: int,
                                        tick_lower: int,
                                        tick_upper: int) -> Dict[int, int]:
-        """Get liquidity distribution for a range of ticks."""
+        """Get liquidity distribution with optimized parallel fetching."""
         pool_contract = self.w3.eth.contract(
             address=Web3.to_checksum_address(pool_address),
             abi=POOL_ABI
         )
         
-        liquidity_by_tick = {}
-        
-        # Fetch tick data in parallel
-        loop = asyncio.get_event_loop()
-        tasks = []
-        ticks_to_fetch = []
-        
-        # Get tick spacing
-        tick_spacing = await loop.run_in_executor(
-            self.executor, 
+        # Get tick spacing first
+        tick_spacing = await self._rate_limited_call(
             lambda: pool_contract.functions.tickSpacing().call(block_identifier=block_number)
         )
         
-        # Only fetch initialized ticks (every tick_spacing)
-        for tick in range(tick_lower, tick_upper + 1, tick_spacing):
-            tasks.append(
-                loop.run_in_executor(
-                    self.executor,
-                    lambda t=tick: pool_contract.functions.ticks(t).call(block_identifier=block_number)
-                )
-            )
-            ticks_to_fetch.append(tick)
+        # Prepare batch of tick calls
+        ticks_to_fetch = list(range(tick_lower, tick_upper + 1, tick_spacing))
         
+        # Create tasks for parallel execution with rate limiting
+        tasks = []
+        for tick in ticks_to_fetch:
+            task = self._rate_limited_call(
+                lambda t=tick: pool_contract.functions.ticks(t).call(block_identifier=block_number)
+            )
+            tasks.append(task)
+        
+        # Execute all tick queries in parallel
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
+        # Process results
+        liquidity_by_tick = {}
         current_liquidity = 0
+        
         for tick, result in zip(ticks_to_fetch, results):
             if isinstance(result, Exception):
+                self.logger.warning(f"Error fetching tick {tick}: {result}")
                 continue
             
             liquidity_gross = result[0]
@@ -280,49 +340,78 @@ class DataFetcher:
                 current_liquidity = liquidity_by_tick[tick]
             filled_liquidity[tick] = current_liquidity
         
+        self.logger.debug(f"Fetched liquidity distribution for {len(ticks_to_fetch)} ticks")
         return filled_liquidity
     
     async def get_swap_events(self, 
                             pool_address: str, 
                             start_block: int, 
-                            end_block: int) -> List[SwapEvent]:
-        """Get swap events for a pool between two blocks."""
+                            end_block: int,
+                            chunk_size: int = 2000) -> List[SwapEvent]:
+        """Get swap events with optimized chunking and parallel processing."""
         pool_contract = self.w3.eth.contract(
             address=Web3.to_checksum_address(pool_address),
             abi=POOL_ABI
         )
         
-        # Fetch events in chunks to avoid timeouts
-        chunk_size = 1000
-        all_events = []
+        # Calculate optimal chunk size based on block range
+        total_blocks = end_block - start_block
+        if total_blocks < 100:
+            chunk_size = total_blocks
+        elif total_blocks > 10000:
+            chunk_size = min(chunk_size, total_blocks // 10)
         
+        # Create chunks for parallel processing
+        chunks = []
         for block_start in range(start_block, end_block + 1, chunk_size):
             block_end = min(block_start + chunk_size - 1, end_block)
-            
-            loop = asyncio.get_event_loop()
-            events = await loop.run_in_executor(
-                self.executor,
-                lambda: pool_contract.events.Swap().get_logs(
-                    from_block=block_start, 
-                    to_block=block_end
-                )
-            )
-            
-            for event in events:
-                swap = SwapEvent(
-                    sender=event['args']['sender'],
-                    recipient=event['args']['recipient'],
-                    amount0=event['args']['amount0'],
-                    amount1=event['args']['amount1'],
-                    sqrt_price_x96=event['args']['sqrtPriceX96'],
-                    liquidity=event['args']['liquidity'],
-                    tick=event['args']['tick'],
-                    block_number=event['blockNumber'],
-                    transaction_hash=event['transactionHash'].hex()
-                )
-                all_events.append(swap)
+            chunks.append((block_start, block_end))
         
+        # Process chunks in parallel with rate limiting
+        tasks = []
+        for chunk_start, chunk_end in chunks:
+            task = self._fetch_events_chunk(pool_contract, chunk_start, chunk_end)
+            tasks.append(task)
+        
+        # Execute all chunks concurrently
+        chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Combine results
+        all_events = []
+        for result in chunk_results:
+            if isinstance(result, Exception):
+                self.logger.warning(f"Error fetching events chunk: {result}")
+                continue
+            all_events.extend(result)
+        
+        self.logger.info(f"Fetched {len(all_events)} swap events from {len(chunks)} chunks")
         return all_events
+    
+    async def _fetch_events_chunk(self, pool_contract: Contract, start_block: int, end_block: int) -> List[SwapEvent]:
+        """Fetch events for a single chunk with rate limiting."""
+        events = await self._rate_limited_call(
+            lambda: pool_contract.events.Swap().get_logs(
+                from_block=start_block, 
+                to_block=end_block
+            )
+        )
+        
+        swap_events = []
+        for event in events:
+            swap = SwapEvent(
+                sender=event['args']['sender'],
+                recipient=event['args']['recipient'],
+                amount0=event['args']['amount0'],
+                amount1=event['args']['amount1'],
+                sqrt_price_x96=event['args']['sqrtPriceX96'],
+                liquidity=event['args']['liquidity'],
+                tick=event['args']['tick'],
+                block_number=event['blockNumber'],
+                transaction_hash=event['transactionHash'].hex()
+            )
+            swap_events.append(swap)
+        
+        return swap_events
     
     async def get_eth_price_in_usdc(self, block_number: int) -> float:
         """
