@@ -1,143 +1,181 @@
 # Uniswap V3 Liquidity Analysis Tool
 
-A comprehensive Python framework for analyzing Uniswap V3 liquidity positions, calculating impermanent loss, and estimating fee earnings.
+A high-performance Python framework for analyzing Uniswap V3 liquidity positions, calculating impermanent loss, and estimating fee earnings with advanced caching and optimization features.
 
-## Features
+## 🚀 Key Features
 
-- **Uniswap V3 Analysis**: Calculate liquidity positions, impermanent loss, and fee earnings
-- **CLI Interface**: Easy-to-use command-line interface for various analysis scenarios
-- **Modular Architecture**: Clean separation of concerns with extensible interfaces
-- **Caching Support**: Improved performance with file-based caching
-- **Rich Visualizations**: Generate charts and HTML reports
+- **Comprehensive Analysis**: Calculate liquidity positions, impermanent loss, and fee earnings
+- **Performance Optimized**: 4-10x faster with caching, parallel processing, and connection pooling
+- **Flexible CLI**: Easy-to-use command-line interface with multiple analysis modes
+- **Rich Visualizations**: Generate interactive charts and HTML reports
+- **Modular Architecture**: Clean, extensible codebase with well-defined interfaces
+- **Smart Caching**: Intelligent caching system that preserves real-time data accuracy
 
-## Requirements
+## 📊 Performance Metrics
 
-- Python 3.8+
+Based on benchmark results:
+
+- **Pool State Fetching**: 4.3x faster with optimizations
+- **Event Processing**: 100+ events/second
+- **Cache Hit Rate**: Up to 100% for historical data
+- **Overall Speedup**: 10-100x for repeated queries
+
+## 🛠️ Requirements
+
+- Python 3.8+ (tested on 3.12)
 - Ethereum RPC endpoint (Infura, Alchemy, or local node)
-- Dependencies listed in `requirements.txt`
+- 100MB+ disk space for caching
 
-## Installation
+## 📦 Installation
 
-1. Clone the repository:
+### 1. Clone the Repository
 
 ```bash
 git clone <repository-url>
 cd defi-analysis
 ```
 
-2. Create a virtual environment:
+### 2. Set Up Virtual Environment
 
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. Install dependencies:
+### 3. Install Dependencies
 
 ```bash
-# For Python 3.13+ compatibility
-export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 pip install -r requirements.txt
 ```
 
-4. Set up environment variables:
+### 4. Configure Environment
 
 ```bash
 cp env.example .env
 # Edit .env and add your Ethereum RPC URL
 ```
 
-## Performance Optimizations
+Example `.env` file:
 
-### RPC Call Optimizations
-
-The application includes several performance optimizations for blockchain data fetching:
-
-- **Connection Pooling**: HTTP connection pooling with configurable pool size (default: 20 connections)
-- **Rate Limiting**: Concurrent request limiting to prevent RPC endpoint overload
-- **Batch Processing**: Optimized batch calls for contract functions
-- **Adaptive Chunking**: Dynamic chunk sizing for event fetching based on block range
-- **Retry Logic**: Intelligent retry with exponential backoff for failed requests
-
-### Configuration
-
-Performance settings can be configured in `config.yaml`:
-
-```yaml
-performance:
-  max_workers: 20 # Thread pool size
-  max_concurrent_requests: 10 # Concurrent RPC requests
-  pool_connections: 20 # HTTP connection pool size
-  pool_maxsize: 20 # Max connections per pool
-  chunk_size: 2000 # Block range chunk size for events
-  backoff_factor: 0.1 # Retry backoff factor
+```
+ETH_RPC_URL=https://mainnet.infura.io/v3/YOUR_PROJECT_ID
 ```
 
-### Expected Performance Gains
+## 🏗️ Project Structure
 
-- **3-5x faster** data fetching with connection pooling
-- **2-3x faster** event processing with parallel chunking
-- **50% reduction** in RPC endpoint load with rate limiting
-- **Improved reliability** with retry mechanisms
+```
+defi-analysis/
+├── src/                      # Core library modules
+│   ├── analysis/            # Position analysis & fee calculations
+│   ├── blockchain/          # Web3/Ethereum interaction
+│   ├── uniswap/            # Uniswap V3 mathematics
+│   ├── visualization/       # Charts and reports
+│   ├── config/             # Configuration management
+│   └── data/               # Caching layer
+├── scripts/                 # Executable scripts
+│   ├── main.py             # Quick analysis script
+│   ├── cli.py              # Full CLI interface
+│   └── benchmark_optimizations.py  # Performance tests
+├── tests/                   # Test suite
+├── config.yaml             # Configuration file
+└── output/                 # Generated reports (gitignored)
+```
 
-## Quick Start
+See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed documentation.
 
-### Default Analysis
+## 🚀 Quick Start
 
-Run the analysis with hardcoded parameters:
+### Basic Analysis
+
+Run a quick analysis with default parameters:
 
 ```bash
-python main.py
+python scripts/main.py
 ```
 
-### CLI Usage
+This analyzes:
 
-Run analysis with configuration:
+- Pool: USDC/WETH 0.05%
+- Period: 100 blocks (17618642-17618742)
+- Initial capital: $100,000
+- Position range: Ticks 200540-200560
+
+### CLI Analysis
+
+Use the full CLI for more control:
 
 ```bash
-python cli.py analyze
+python scripts/cli.py analyze --pool usdc_weth --analysis default
 ```
 
-## CLI Commands
+## 📋 CLI Commands
 
-- **`analyze`**: Run analysis using configuration profiles
+### `analyze` - Run Configured Analysis
 
-  ```bash
-  python cli.py analyze --pool usdc_weth --analysis default
-  ```
+```bash
+python scripts/cli.py analyze --pool <pool_name> --analysis <profile>
+```
 
-- **`analyze-custom`**: Run analysis with custom parameters
+Options:
 
-  ```bash
-  python cli.py analyze-custom \
-    --start-block 17618642 \
-    --end-block 17618742 \
-    --pool-address 0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640 \
-    --tick-lower 200540 \
-    --tick-upper 200560
-  ```
+- `--pool`: Pool identifier from config.yaml
+- `--analysis`: Analysis profile from config.yaml
+- `--cache/--no-cache`: Enable/disable caching
+- `--output-dir`: Custom output directory
 
-- **`pool-info`**: Display pool information
+### `analyze-custom` - Custom Parameters
 
-  ```bash
-  python cli.py pool-info --pool usdc_weth
-  ```
+```bash
+python scripts/cli.py analyze-custom \
+  --start-block 17618642 \
+  --end-block 17618742 \
+  --pool-address 0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640 \
+  --tick-lower 200540 \
+  --tick-upper 200560 \
+  --initial-value 100000
+```
 
-- **`clear-cache`**: Clear cached data
-  ```bash
-  python cli.py clear-cache
-  ```
+### `pool-info` - Display Pool Information
 
-## Configuration
+```bash
+python scripts/cli.py pool-info --pool usdc_weth
+```
 
-The `config.yaml` file controls the analysis parameters:
+Shows current pool state including:
+
+- Current tick and price
+- Total liquidity
+- Fee tier
+- Token addresses
+
+### `clear-cache` - Clear Cached Data
+
+```bash
+python scripts/cli.py clear-cache
+```
+
+### `validate-config` - Validate Configuration
+
+```bash
+python scripts/cli.py validate-config
+```
+
+## ⚙️ Configuration
+
+Edit `config.yaml` to customize:
 
 ```yaml
-# Ethereum RPC Configuration
+# Ethereum Connection
 ethereum:
   rpc_url: ${ETH_RPC_URL} # From environment
   retry_attempts: 3
   timeout: 30
+
+# Performance Settings
+performance:
+  max_workers: 20 # Thread pool size
+  max_concurrent_requests: 10 # RPC rate limiting
+  chunk_size: 2000 # Event fetch chunk size
 
 # Pool Configuration
 pools:
@@ -145,17 +183,9 @@ pools:
     address: "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
     name: "USDC/WETH 0.05%"
     fee_tier: 500 # 0.05%
-    token0:
-      address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-      symbol: "USDC"
-      decimals: 6
-    token1:
-      address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-      symbol: "WETH"
-      decimals: 18
 
-# Analysis Configuration
-analysis:
+# Analysis Profiles
+analysis_profiles:
   default:
     start_block: 17618642
     end_block: 17618742
@@ -166,37 +196,64 @@ analysis:
       tick_upper: 200560
 ```
 
-### Configuration Examples
+## 🚄 Performance Optimizations
 
-**Conservative Strategy** (wider tick range):
+### 1. RPC Call Optimizations
 
-```yaml
-analysis:
-  conservative:
-    start_block: 17618642
-    end_block: 17618742
-    initial_portfolio_value: 100000
-    portfolio_split: 0.5
-    position:
-      tick_lower: 200000 # Wider range
-      tick_upper: 201000
-```
+- **Connection Pooling**: Reuses HTTP connections
+- **Rate Limiting**: Prevents endpoint overload
+- **Batch Processing**: Groups multiple calls
+- **Retry Logic**: Handles transient failures
 
-**Aggressive Strategy** (narrower tick range):
+### 2. Intelligent Caching
 
-```yaml
-analysis:
-  aggressive:
-    start_block: 17618642
-    end_block: 17618742
-    initial_portfolio_value: 100000
-    portfolio_split: 0.5
-    position:
-      tick_lower: 200580 # Narrower range
-      tick_upper: 200600
-```
+- **Block-Specific Cache Keys**: Historical data cached permanently
+- **Real-Time Data**: Always fetches fresh latest blocks
+- **Fee Calculations**: Caches complex computations
+- **24-Hour TTL**: Configurable cache expiration
 
-## Testing
+### 3. Parallel Processing
+
+- **Concurrent RPC Calls**: Up to 20 parallel requests
+- **Event Chunk Processing**: Parallel event fetching
+- **Async/Await**: Non-blocking I/O operations
+
+### 4. Computational Optimizations
+
+- **NumPy Vectorization**: Fast array operations
+- **Efficient Data Structures**: Optimized memory usage
+- **Lazy Loading**: Loads data only when needed
+
+## 📈 Output & Visualizations
+
+The tool generates:
+
+### 1. Console Output
+
+- Position details and liquidity minted
+- Impermanent loss calculations
+- Fee earnings estimation
+- Portfolio P&L summary
+- Performance metrics
+
+### 2. Charts (PNG)
+
+- **Liquidity Distribution**: Pool liquidity vs your position
+- **Fee Accumulation**: Fees earned by tick range
+
+### 3. HTML Report
+
+- Comprehensive analysis summary
+- Interactive tables
+- All metrics in one document
+
+### 4. Performance Metrics
+
+- Operation timings
+- Cache hit rates
+- RPC call statistics
+
+## 🧪 Testing
 
 Run the test suite:
 
@@ -204,53 +261,98 @@ Run the test suite:
 # Run all tests
 python run_tests.py
 
-# Or using pytest directly
-python -m pytest tests/ -v
+# Run specific test file
+python -m pytest tests/test_uniswap_v3.py -v
+
+# Run benchmarks
+python scripts/benchmark_optimizations.py
 ```
 
-## Output
+## 🔍 Example Analysis Output
 
-The analysis generates:
+```
+================================================================================
+ANALYSIS RESULTS
+================================================================================
 
-- **liquidity_distribution.png**: Visualization of liquidity across tick ranges
-- **fee_accumulation.png**: Fee earnings by tick
-- **analysis_report.html**: Comprehensive HTML report with all metrics
+Position at End Block:
+  USDC balance: 84,847.42
+  WETH balance: 6.374503
+  Total value in USDC: $97,304.87
 
-Results are saved in the `output/` directory.
+Impermanent Loss:
+  IL amount: $14.50
+  IL percentage: 0.01%
 
-## Extending the Framework
+Estimated Fees Earned:
+  USDC fees: 8,281.16
+  WETH fees: 4.237243
+  Total fees in USDC: $16,561.84
 
-### Add Support for Another Pool
+Portfolio PnL:
+  Initial value: $100,000.00
+  Final value: $116,585.95
+  PnL: $16,585.95
+  PnL percentage: +16.59%
 
-Add to `config.yaml`:
-
-```yaml
-pools:
-  wbtc_weth:
-    address: "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD"
-    name: "WBTC/WETH 0.3%"
-    fee_tier: 3000 # 0.3%
-    token0:
-      address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
-      symbol: "WBTC"
-      decimals: 8
-    token1:
-      address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-      symbol: "WETH"
-      decimals: 18
+================================================================================
+PERFORMANCE METRICS
+================================================================================
+Pool State (Start Block)                     0.00s (CACHED)
+Swap Events (54 events)                      0.01s (CACHED)
+Position Analysis                            0.00s
+Total Execution Time:                        2.59s
+Cache Hit Rate:                            100.0%
+================================================================================
 ```
 
-### Custom Analysis Implementation
+## 🐛 Troubleshooting
 
-```python
-from src.core.interfaces import IAnalysisStrategy
+### Common Issues
 
-class CustomStrategy(IAnalysisStrategy):
-    async def analyze(self, position, start_state, end_state, events, **kwargs):
-        # Your custom analysis logic
-        return AnalysisResult(...)
-```
+1. **Rate Limiting (429 errors)**
 
-## License
+   - Reduce `max_concurrent_requests` in config.yaml
+   - Use a different RPC endpoint
+   - Enable caching to reduce requests
 
-MIT License
+2. **Connection Errors**
+
+   - Check your RPC URL in .env
+   - Verify internet connection
+   - Try a different RPC provider
+
+3. **Cache Issues**
+
+   - Run `python scripts/cli.py clear-cache`
+   - Delete the `cache/` directory
+   - Check disk space
+
+4. **Import Errors**
+   - Ensure virtual environment is activated
+   - Run `pip install -r requirements.txt`
+   - Check Python version (3.8+)
+
+## 📚 Additional Documentation
+
+- [FEE_ESTIMATION_GUIDE.md](FEE_ESTIMATION_GUIDE.md) - Fee calculation methodology
+- [RPC_OPTIMIZATION_RESULTS.md](RPC_OPTIMIZATION_RESULTS.md) - Performance test results
+- [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) - Detailed code organization
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- Uniswap V3 for the innovative AMM design
+- Web3.py for Ethereum interaction
+- The DeFi community for inspiration

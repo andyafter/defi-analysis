@@ -2,19 +2,24 @@
 Analysis module for calculating impermanent loss, fees, and PnL.
 """
 
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 from dataclasses import dataclass
 import math
+import hashlib
+import json
+import numpy as np
 
-from uniswap_v3 import UniswapV3Calculator, Position
-from data_fetcher import PoolState, SwapEvent
+from src.uniswap import UniswapV3Calculator, Position
+from src.blockchain import PoolState, SwapEvent
+from src.core.interfaces import ICacheProvider
 
 
 class PositionAnalyzer:
     """Analyzes Uniswap V3 positions for IL, fees, and PnL."""
     
-    def __init__(self, calculator: UniswapV3Calculator):
+    def __init__(self, calculator: UniswapV3Calculator, cache: Optional[ICacheProvider] = None):
         self.calculator = calculator
+        self.cache = cache
         
     def calculate_impermanent_loss(
         self,
@@ -44,7 +49,20 @@ class PositionAnalyzer:
         
         return il_amount, il_percentage
     
-    def estimate_fees_from_swaps(
+    def _get_fee_cache_key(self, position: Position, swap_events: List[SwapEvent], pool_fee: int) -> str:
+        """Generate a cache key for fee calculations."""
+        # Create a hash of the position and swap events
+        position_hash = f"{position.liquidity}_{position.tick_lower}_{position.tick_upper}"
+        
+        # Hash swap events (use first/last block and count for efficiency)
+        if swap_events:
+            swap_hash = f"{swap_events[0].block_number}_{swap_events[-1].block_number}_{len(swap_events)}"
+        else:
+            swap_hash = "no_swaps"
+        
+        return f"fees:{position_hash}:{swap_hash}:{pool_fee}"
+
+    async def estimate_fees_from_swaps(
         self,
         position: Position,
         swap_events: List[SwapEvent],
@@ -55,11 +73,18 @@ class PositionAnalyzer:
         Estimate fees earned from swap events.
         Returns fees by tick as {tick: (usdc_fees, weth_fees)}.
         """
+        # Check cache first
+        if self.cache:
+            cache_key = self._get_fee_cache_key(position, swap_events, pool_fee)
+            cached_fees = await self.cache.get(cache_key)
+            if cached_fees:
+                return cached_fees
+        
         fee_by_tick = {}
         
-        # Initialize fee accumulation for our tick range
-        for tick in range(position.tick_lower, position.tick_upper + 1):
-            fee_by_tick[tick] = (0.0, 0.0)
+        # Initialize fee accumulation for our tick range - vectorized
+        tick_range = np.arange(position.tick_lower, position.tick_upper + 1)
+        fee_by_tick = {tick: (0.0, 0.0) for tick in tick_range}
         
         # Process each swap event
         for i, swap in enumerate(swap_events):
@@ -90,26 +115,34 @@ class PositionAnalyzer:
             if tick_start <= tick_end:
                 ticks_crossed = tick_end - tick_start + 1
                 
-                for tick in range(tick_start, tick_end + 1):
-                    if tick in fee_by_tick:
-                        # Calculate our share of liquidity at this tick
-                        total_liquidity = liquidity_distribution.get(tick, 1)
-                        if total_liquidity > 0:
-                            our_share = position.liquidity / total_liquidity
-                            
-                            # Proportional fee share
-                            tick_fee0 = (fee0 / ticks_crossed) * our_share
-                            tick_fee1 = (fee1 / ticks_crossed) * our_share
-                            
-                            old_fees = fee_by_tick[tick]
-                            fee_by_tick[tick] = (
-                                old_fees[0] + tick_fee0,
-                                old_fees[1] + tick_fee1
-                            )
+                # Vectorized fee distribution
+                tick_array = np.arange(tick_start, tick_end + 1)
+                valid_ticks = tick_array[np.isin(tick_array, list(fee_by_tick.keys()))]
+                
+                if len(valid_ticks) > 0:
+                    # Calculate liquidity shares for all ticks at once
+                    total_liquidities = np.array([liquidity_distribution.get(t, 1) for t in valid_ticks])
+                    our_shares = np.where(total_liquidities > 0, position.liquidity / total_liquidities, 0)
+                    
+                    # Distribute fees
+                    tick_fee0_array = (fee0 / ticks_crossed) * our_shares
+                    tick_fee1_array = (fee1 / ticks_crossed) * our_shares
+                    
+                    # Update fee_by_tick
+                    for i, tick in enumerate(valid_ticks):
+                        old_fees = fee_by_tick[tick]
+                        fee_by_tick[tick] = (
+                            old_fees[0] + tick_fee0_array[i],
+                            old_fees[1] + tick_fee1_array[i]
+                        )
+        
+        # Cache the result
+        if self.cache:
+            await self.cache.set(cache_key, fee_by_tick, ttl=86400)  # Cache for 24 hours
         
         return fee_by_tick
     
-    def analyze_position(
+    async def analyze_position(
         self,
         position: Position,
         pool_state_start: PoolState,
@@ -139,7 +172,7 @@ class PositionAnalyzer:
         )
         
         # Estimate fees
-        fee_by_tick = self.estimate_fees_from_swaps(
+        fee_by_tick = await self.estimate_fees_from_swaps(
             position,
             swap_events,
             liquidity_distribution,

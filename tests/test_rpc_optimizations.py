@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import optimized components
-from data_fetcher import DataFetcher
+from src.blockchain import DataFetcher
 from src.config import ConfigManager
 
 # Test constants

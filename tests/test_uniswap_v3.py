@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from uniswap_v3 import UniswapV3Calculator, Position, Q96
+from src.uniswap import UniswapV3Calculator, Position, Q96
 
 
 class TestUniswapV3Calculator(unittest.TestCase):

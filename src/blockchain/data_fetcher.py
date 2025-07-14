@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 import requests
+from src.data.cache import FileCache, CacheKeyBuilder
+from src.core.interfaces import ICacheProvider
 
 # Uniswap V3 Pool ABI (minimal)
 POOL_ABI = json.loads('''[
@@ -198,16 +200,20 @@ class OptimizedHTTPProvider(HTTPProvider):
 class DataFetcher:
     """Optimized data fetcher with connection pooling and batch requests."""
     
-    def __init__(self, rpc_url: str, max_workers: int = 20, max_concurrent_requests: int = 10):
+    def __init__(self, rpc_url: str, max_workers: int = 20, max_concurrent_requests: int = 10, cache: Optional[ICacheProvider] = None):
         """Initialize optimized data fetcher.
         
         Args:
             rpc_url: Ethereum RPC endpoint URL
             max_workers: Maximum number of thread pool workers
             max_concurrent_requests: Maximum concurrent RPC requests
+            cache: Optional cache provider for storing results
         """
         # Initialize Web3 with optimized provider
         self.w3 = Web3(OptimizedHTTPProvider(rpc_url))
+        
+        # Cache provider
+        self.cache = cache
         
         # Retry connection with backoff
         max_retries = 3
@@ -238,6 +244,14 @@ class DataFetcher:
     
     async def get_pool_state(self, pool_address: str, block_number: int) -> PoolState:
         """Get pool state with optimized batch calls."""
+        # Check cache first
+        if self.cache:
+            cache_key = CacheKeyBuilder.pool_state_key(pool_address, block_number)
+            cached_state = await self.cache.get(cache_key)
+            if cached_state:
+                self.logger.debug(f"Cache hit for pool state at block {block_number}")
+                return cached_state
+        
         pool_contract = self.w3.eth.contract(
             address=Web3.to_checksum_address(pool_address),
             abi=POOL_ABI
@@ -269,7 +283,7 @@ class DataFetcher:
             
             self.logger.debug(f"Fetched pool state for {pool_address} at block {block_number}")
             
-            return PoolState(
+            pool_state = PoolState(
                 sqrt_price_x96=slot0[0],
                 tick=slot0[1],
                 liquidity=liquidity,
@@ -279,6 +293,13 @@ class DataFetcher:
                 token1=token1,
                 block_number=block_number
             )
+            
+            # Cache the result
+            if self.cache:
+                await self.cache.set(cache_key, pool_state, ttl=86400)  # Cache for 24 hours
+                self.logger.debug(f"Cached pool state for block {block_number}")
+            
+            return pool_state
             
         except Exception as e:
             self.logger.error(f"Error fetching pool state: {e}")
@@ -349,6 +370,14 @@ class DataFetcher:
                             end_block: int,
                             chunk_size: int = 2000) -> List[SwapEvent]:
         """Get swap events with optimized chunking and parallel processing."""
+        # Check cache first
+        if self.cache:
+            cache_key = CacheKeyBuilder.swap_events_key(pool_address, start_block, end_block)
+            cached_events = await self.cache.get(cache_key)
+            if cached_events:
+                self.logger.debug(f"Cache hit for swap events blocks {start_block}-{end_block}")
+                return cached_events
+        
         pool_contract = self.w3.eth.contract(
             address=Web3.to_checksum_address(pool_address),
             abi=POOL_ABI
@@ -385,14 +414,22 @@ class DataFetcher:
             all_events.extend(result)
         
         self.logger.info(f"Fetched {len(all_events)} swap events from {len(chunks)} chunks")
+        
+        # Cache the result
+        if self.cache and all_events:
+            await self.cache.set(cache_key, all_events, ttl=86400)  # Cache for 24 hours
+            self.logger.debug(f"Cached {len(all_events)} swap events")
+        
         return all_events
     
     async def _fetch_events_chunk(self, pool_contract: Contract, start_block: int, end_block: int) -> List[SwapEvent]:
         """Fetch events for a single chunk with rate limiting."""
-        events = await self._rate_limited_call(
+        loop = asyncio.get_event_loop()
+        events = await loop.run_in_executor(
+            self.executor,
             lambda: pool_contract.events.Swap().get_logs(
-                from_block=start_block, 
-                to_block=end_block
+                fromBlock=start_block, 
+                toBlock=end_block
             )
         )
         
@@ -447,9 +484,24 @@ class DataFetcher:
     
     async def get_block_timestamp(self, block_number: int) -> int:
         """Get timestamp of a block."""
+        # Check cache first
+        if self.cache:
+            cache_key = CacheKeyBuilder.block_timestamp_key(block_number)
+            cached_timestamp = await self.cache.get(cache_key)
+            if cached_timestamp:
+                self.logger.debug(f"Cache hit for block timestamp {block_number}")
+                return cached_timestamp
+        
         loop = asyncio.get_event_loop()
         block = await loop.run_in_executor(
             self.executor,
             lambda: self.w3.eth.get_block(block_number)
         )
-        return block['timestamp'] 
+        timestamp = block['timestamp']
+        
+        # Cache the result
+        if self.cache:
+            await self.cache.set(cache_key, timestamp, ttl=86400 * 7)  # Cache for 7 days
+            self.logger.debug(f"Cached timestamp for block {block_number}")
+        
+        return timestamp 

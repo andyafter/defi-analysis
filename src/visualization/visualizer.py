@@ -9,8 +9,8 @@ from typing import Dict, Any, Tuple
 import numpy as np
 from datetime import datetime
 
-from uniswap_v3 import Position
-from data_fetcher import PoolState
+from src.uniswap import Position
+from src.blockchain import PoolState
 
 
 class Visualizer:
@@ -33,20 +33,18 @@ class Visualizer:
         output_path: str
     ):
         """Plot liquidity distribution with position overlay."""
-        # Prepare data
-        tick_range = range(tick_lower - 10, tick_upper + 11)
-        ticks = list(tick_range)
+        # Prepare data using NumPy for better performance
+        ticks = np.arange(tick_lower - 10, tick_upper + 11)
         
-        # Get total liquidity for each tick
-        total_liquidity = [liquidity_distribution.get(tick, 0) for tick in ticks]
+        # Vectorized liquidity lookup
+        total_liquidity = np.array([liquidity_distribution.get(tick, 0) for tick in ticks])
         
-        # Calculate position liquidity for visualization
-        position_liquidity = []
-        for tick in ticks:
-            if position.tick_lower <= tick <= position.tick_upper:
-                position_liquidity.append(position.liquidity)
-            else:
-                position_liquidity.append(0)
+        # Vectorized position liquidity calculation
+        position_liquidity = np.where(
+            (ticks >= position.tick_lower) & (ticks <= position.tick_upper),
+            position.liquidity,
+            0
+        )
         
         # Create figure
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
@@ -89,10 +87,11 @@ class Visualizer:
         output_path: str
     ):
         """Plot fee accumulation by tick."""
-        # Prepare data
-        ticks = sorted(fee_by_tick.keys())
-        usdc_fees = [fee_by_tick[tick][0] for tick in ticks]
-        weth_fees = [fee_by_tick[tick][1] for tick in ticks]
+        # Prepare data using NumPy for efficiency
+        ticks = np.array(sorted(fee_by_tick.keys()))
+        fees_array = np.array([fee_by_tick[tick] for tick in ticks])
+        usdc_fees = fees_array[:, 0]
+        weth_fees = fees_array[:, 1]
         
         # Create figure with two subplots
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))

@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Command-line interface for Uniswap V3 analysis."""
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import click
 import asyncio
 import logging
@@ -9,10 +15,10 @@ from typing import Optional
 
 from src.config import ConfigManager
 from src.data.cache import FileCache
-from data_fetcher import DataFetcher
-from uniswap_v3 import UniswapV3Calculator, Position
-from analysis import PositionAnalyzer  
-from visualization import Visualizer
+from src.blockchain import DataFetcher
+from src.uniswap import UniswapV3Calculator, Position
+from src.analysis import PositionAnalyzer  
+from src.visualization import Visualizer
 
 
 @click.group()
@@ -170,20 +176,35 @@ def validate_config(ctx):
 async def _run_analysis(config, pool_config, analysis_config, use_cache: bool):
     """Run the actual analysis."""
     logger = logging.getLogger(__name__)
+    import time
+    
+    class PerformanceLogger:
+        def __init__(self):
+            self.start_time = time.time()
+            
+        def log(self, operation: str, duration: float, cached: bool = None):
+            status = ""
+            if cached is not None:
+                status = " (CACHED)" if cached else " (FETCHED)"
+            logger.info(f"Performance: {operation} - {duration:.2f}s{status}")
+    
+    perf = PerformanceLogger()
     
     try:
         # Initialize components with optimized settings
+        init_start = time.time()
         cache = FileCache(config.cache.directory) if use_cache and config.cache.enabled else None
         
         # Create optimized data fetcher with performance settings
         data_fetcher = DataFetcher(
             rpc_url=config.ethereum.rpc_url,
             max_workers=config.performance.max_workers,
-            max_concurrent_requests=config.performance.max_concurrent_requests
+            max_concurrent_requests=config.performance.max_concurrent_requests,
+            cache=cache
         )
         
         calculator = UniswapV3Calculator()
-        analyzer = PositionAnalyzer(calculator)
+        analyzer = PositionAnalyzer(calculator, cache=cache)
         visualizer = Visualizer()
         
         # Create output directory
@@ -244,7 +265,7 @@ async def _run_analysis(config, pool_config, analysis_config, use_cache: bool):
         )
         
         # Analyze position
-        results = analyzer.analyze_position(
+        results = await analyzer.analyze_position(
             position,
             pool_data_start,
             pool_data_end,
@@ -292,10 +313,14 @@ async def _run_analysis(config, pool_config, analysis_config, use_cache: bool):
 
 async def _show_pool_info(config, pool_config, block_number: Optional[int]):
     """Show pool information."""
+    # Create cache if enabled
+    cache = FileCache(config.cache.directory) if config.cache.enabled else None
+    
     data_fetcher = DataFetcher(
         rpc_url=config.ethereum.rpc_url,
         max_workers=config.performance.max_workers,
-        max_concurrent_requests=config.performance.max_concurrent_requests
+        max_concurrent_requests=config.performance.max_concurrent_requests,
+        cache=cache
     )
     
     # Use latest block if not specified
