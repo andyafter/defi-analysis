@@ -310,59 +310,246 @@ class DataFetcher:
                                        block_number: int,
                                        tick_lower: int,
                                        tick_upper: int) -> Dict[int, int]:
-        """Get liquidity distribution with optimized parallel fetching."""
+        """
+        Get liquidity distribution across a tick range.
+        
+        This method correctly handles Uniswap V3's tick-based liquidity by:
+        1. Starting from the pool's actual liquidity at the current tick
+        2. Walking backwards/forwards and applying liquidity changes
+        3. Ensuring liquidity never goes negative
+        
+        Args:
+            pool_address: The Uniswap V3 pool address
+            block_number: Block number to query at
+            tick_lower: Lower bound of tick range (inclusive)
+            tick_upper: Upper bound of tick range (inclusive)
+            
+        Returns:
+            Dict mapping tick -> liquidity amount at that tick
+            
+        Example:
+            >>> # Get liquidity distribution for USDC/WETH pool
+            >>> distribution = await fetcher.get_liquidity_distribution(
+            ...     pool_address="0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640",
+            ...     block_number=17618642,
+            ...     tick_lower=200540,
+            ...     tick_upper=200560
+            ... )
+            >>> # Result: {200540: 1500000, 200541: 1500000, ..., 200560: 2000000}
+            
+        Technical Details:
+            In Uniswap V3, liquidity is concentrated in tick ranges. Each tick
+            stores a 'liquidity_net' value which represents the change in 
+            liquidity when the price crosses that tick:
+            
+            - Positive liquidity_net: Liquidity is added (positions enter range)
+            - Negative liquidity_net: Liquidity is removed (positions exit range)
+            
+            To calculate total liquidity at any tick, we start from a known 
+            reference point (current tick with current liquidity) and walk
+            through ticks, applying these changes.
+        """
+        # Step 1: Set up pool contract
         pool_contract = self.w3.eth.contract(
             address=Web3.to_checksum_address(pool_address),
             abi=POOL_ABI
         )
         
-        # Get tick spacing first
+        # Step 2: Get pool configuration (tick spacing)
         tick_spacing = await self._rate_limited_call(
             lambda: pool_contract.functions.tickSpacing().call(block_identifier=block_number)
         )
         
-        # Prepare batch of tick calls
-        ticks_to_fetch = list(range(tick_lower, tick_upper + 1, tick_spacing))
+        # Step 3: Get current pool state (current tick and liquidity)
+        slot0_task = self._rate_limited_call(
+            lambda: pool_contract.functions.slot0().call(block_identifier=block_number)
+        )
+        liquidity_task = self._rate_limited_call(
+            lambda: pool_contract.functions.liquidity().call(block_identifier=block_number)
+        )
         
-        # Create tasks for parallel execution with rate limiting
+        slot0, current_pool_liquidity = await asyncio.gather(slot0_task, liquidity_task)
+        current_tick = slot0[1]  # Extract current tick from slot0
+        
+        # Step 4: Determine which ticks to fetch (must be aligned with tick spacing)
+        tick_lower_aligned = self._align_tick_lower(tick_lower, tick_spacing)
+        tick_upper_aligned = self._align_tick_upper(tick_upper, tick_spacing)
+        ticks_to_fetch = list(range(tick_lower_aligned, tick_upper_aligned + 1, tick_spacing))
+        
+        # Step 5: Fetch tick data in parallel for efficiency
+        tick_data = await self._fetch_tick_data(
+            pool_contract, ticks_to_fetch, block_number
+        )
+        
+        # Step 6: Calculate liquidity distribution
+        filled_liquidity = self._calculate_liquidity_distribution(
+            tick_lower, tick_upper, tick_spacing,
+            current_tick, current_pool_liquidity, tick_data
+        )
+        
+        self.logger.debug(
+            f"Fetched liquidity distribution for {len(ticks_to_fetch)} ticks, "
+            f"range [{tick_lower}, {tick_upper}]"
+        )
+        return filled_liquidity
+    
+    def _align_tick_lower(self, tick: int, tick_spacing: int) -> int:
+        """Align tick to be a multiple of tick_spacing (round down)."""
+        return tick - (tick % tick_spacing)
+    
+    def _align_tick_upper(self, tick: int, tick_spacing: int) -> int:
+        """Align tick to be a multiple of tick_spacing (round up)."""
+        return tick + (tick_spacing - (tick % tick_spacing)) % tick_spacing
+    
+    async def _fetch_tick_data(self, 
+                              pool_contract: Contract,
+                              ticks_to_fetch: List[int],
+                              block_number: int) -> Dict[int, Dict[str, int]]:
+        """
+        Fetch tick data for multiple ticks in parallel.
+        
+        Returns:
+            Dict mapping tick -> {'liquidity_gross': int, 'liquidity_net': int}
+        """
+        # Create tasks for parallel execution
         tasks = []
         for tick in ticks_to_fetch:
             task = self._rate_limited_call(
-                lambda t=tick: pool_contract.functions.ticks(t).call(block_identifier=block_number)
+                lambda t=tick: pool_contract.functions.ticks(t).call(
+                    block_identifier=block_number
+                )
             )
             tasks.append(task)
         
         # Execute all tick queries in parallel
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Process results
-        liquidity_by_tick = {}
-        current_liquidity = 0
-        
+        # Process results into tick data dictionary
+        tick_data = {}
         for tick, result in zip(ticks_to_fetch, results):
             if isinstance(result, Exception):
                 self.logger.warning(f"Error fetching tick {tick}: {result}")
                 continue
             
+            # Unpack tick data tuple
             liquidity_gross = result[0]
             liquidity_net = result[1]
             initialized = result[7]
             
+            # Only store data for initialized ticks
             if initialized:
-                current_liquidity += liquidity_net
-                liquidity_by_tick[tick] = current_liquidity
+                tick_data[tick] = {
+                    'liquidity_gross': liquidity_gross,
+                    'liquidity_net': liquidity_net
+                }
         
-        # Fill in liquidity for all ticks
+        return tick_data
+    
+    def _calculate_liquidity_distribution(self,
+                                        tick_lower: int,
+                                        tick_upper: int,
+                                        tick_spacing: int,
+                                        current_tick: int,
+                                        current_pool_liquidity: int,
+                                        tick_data: Dict[int, Dict[str, int]]) -> Dict[int, int]:
+        """
+        Calculate liquidity at each tick by walking from the current tick.
+        
+        Key insight: liquidity_net represents the CHANGE in liquidity when
+        crossing a tick. We need to apply these changes correctly based on
+        the direction we're walking.
+        
+        Visual Example:
+        
+            tick:    199990    200000    200010    200020    200030
+            liq_net:   +500k    -300k    current    +200k    -100k
+                         |         |         |         |         |
+        walking  <--------<--------    [5M]   -------->-------->  walking
+        backwards: reverse changes            apply changes      forwards
+        
+        If current liquidity at tick 200010 is 5M:
+        - At 200000: 5M - (-300k) = 5.3M (reverse the exit)
+        - At 199990: 5.3M - (+500k) = 4.8M (reverse the entry)
+        - At 200020: 5M + (+200k) = 5.2M (apply the entry)
+        - At 200030: 5.2M + (-100k) = 5.1M (apply the exit)
+        
+        Returns:
+            Dict mapping tick -> liquidity at that tick
+        """
         filled_liquidity = {}
-        current_liquidity = 0
         
+        # Find the nearest initialized tick to use as reference
+        reference_tick = current_tick - (current_tick % tick_spacing)
+        
+        # Calculate liquidity for each tick in the range
         for tick in range(tick_lower, tick_upper + 1):
-            if tick in liquidity_by_tick:
-                current_liquidity = liquidity_by_tick[tick]
-            filled_liquidity[tick] = current_liquidity
+            if tick < reference_tick:
+                # Walking backwards from reference tick
+                liquidity = self._calculate_liquidity_backwards(
+                    current_pool_liquidity, reference_tick, tick, 
+                    tick_spacing, tick_data
+                )
+            elif tick == reference_tick:
+                # At reference tick, use current pool liquidity
+                liquidity = current_pool_liquidity
+            else:
+                # Walking forwards from reference tick
+                liquidity = self._calculate_liquidity_forwards(
+                    current_pool_liquidity, reference_tick, tick,
+                    tick_spacing, tick_data
+                )
+            
+            # Ensure liquidity never goes negative (safety check)
+            filled_liquidity[tick] = max(0, liquidity)
         
-        self.logger.debug(f"Fetched liquidity distribution for {len(ticks_to_fetch)} ticks")
         return filled_liquidity
+    
+    def _calculate_liquidity_backwards(self,
+                                     start_liquidity: int,
+                                     start_tick: int,
+                                     target_tick: int,
+                                     tick_spacing: int,
+                                     tick_data: Dict[int, Dict[str, int]]) -> int:
+        """
+        Calculate liquidity when walking backwards from start_tick to target_tick.
+        
+        When moving backwards, we need to REVERSE the liquidity changes:
+        - If liquidity_net is positive at a tick, it means liquidity enters when
+          price crosses UP through that tick, so when going backwards (down),
+          we need to subtract it.
+        """
+        liquidity = start_liquidity
+        
+        # Walk backwards through ticks
+        for tick in range(start_tick, target_tick, -tick_spacing):
+            if tick in tick_data:
+                # Reverse the liquidity change
+                liquidity -= tick_data[tick]['liquidity_net']
+        
+        return liquidity
+    
+    def _calculate_liquidity_forwards(self,
+                                    start_liquidity: int,
+                                    start_tick: int,
+                                    target_tick: int,
+                                    tick_spacing: int,
+                                    tick_data: Dict[int, Dict[str, int]]) -> int:
+        """
+        Calculate liquidity when walking forwards from start_tick to target_tick.
+        
+        When moving forwards, we apply liquidity changes as-is:
+        - Positive liquidity_net means liquidity enters
+        - Negative liquidity_net means liquidity exits
+        """
+        liquidity = start_liquidity
+        
+        # Walk forwards through ticks
+        for tick in range(start_tick + tick_spacing, target_tick + 1, tick_spacing):
+            if tick in tick_data:
+                # Apply the liquidity change
+                liquidity += tick_data[tick]['liquidity_net']
+        
+        return liquidity
     
     async def get_swap_events(self, 
                             pool_address: str, 
